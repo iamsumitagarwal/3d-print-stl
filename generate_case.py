@@ -38,6 +38,9 @@ CAM_W, CAM_H = 71.0, 45.0       # camera opening
 CAM_R = 9.0
 CAM_TOP_MARGIN = 5.0            # from top edge of case to opening
 BEZEL_W, BEZEL_H = 1.6, 1.6     # raised camera rim (width, protrusion)
+LOGO_TEXT = "SUMIT"             # debossed on the back, reads bottom-to-top
+LOGO_HEIGHT, LOGO_DEPTH = 4.5, 0.4
+LOGO_POS = (-30.0, -44.0)       # x, y of text centre (lower area of the back)
 MAGSAFE_Y = -4.0
 MAGSAFE_OD, MAGSAFE_ID, MAGSAFE_DEPTH = 56.0, 53.0, 0.4
 
@@ -54,6 +57,35 @@ def prism(cs, z0, z1):
 
 def box(x0, x1, y0, y1, z0, z1):
     return Manifold.cube((x1 - x0, y1 - y0, z1 - z0)).translate((x0, y0, z0))
+
+
+def text_solid(text, height, depth, cx, cy):
+    """Debossing tool: text as seen from the back (-Z), rotated to read upward."""
+    from matplotlib.textpath import TextPath
+    from matplotlib.font_manager import FontProperties
+    import shapely.geometry as sg, shapely.affinity as sa
+    from shapely.ops import unary_union
+    tp = TextPath((0, 0), text, size=height, prop=FontProperties(weight="bold"))
+    polys = []
+    for p in tp.to_polygons():
+        polys.append(sg.Polygon(p))
+    # even-odd combine (letters with holes: O, A ...)
+    geom = polys[0]
+    for p in polys[1:]:
+        geom = geom.symmetric_difference(p)
+    geom = sa.rotate(geom, 90, origin=(0, 0))          # read bottom-to-top
+    minx, miny, maxx, maxy = geom.bounds
+    geom = sa.translate(geom, -(minx + maxx) / 2, -(miny + maxy) / 2)
+    geom = sa.scale(geom, xfact=-1, yfact=1, origin=(0, 0))  # back view is X-mirrored
+    geoms = geom.geoms if hasattr(geom, "geoms") else [geom]
+    tool = None
+    for g in geoms:
+        g = sg.polygon.orient(g, 1.0)   # exterior CCW, holes CW
+        cs = CrossSection([np.array(g.exterior.coords)[:-1]] +
+                          [np.array(i.coords)[:-1] for i in g.interiors])
+        m = prism(cs, Z_BACK - 0.01, Z_BACK + depth)
+        tool = m if tool is None else tool + m
+    return tool.translate((cx, cy, 0))
 
 
 def to_mesh(m):
@@ -101,6 +133,7 @@ def build():
                  0.0 - MAGSAFE_DEPTH, 0.01).translate((0, MAGSAFE_Y, 0))
     pill = prism(rrect(6.0, 14.0, 3.0), -MAGSAFE_DEPTH, 0.01).translate((0, MAGSAFE_Y - 36.0, 0))
     shell = shell - ring - pill
+    shell = shell - text_solid(LOGO_TEXT, LOGO_HEIGHT, LOGO_DEPTH, *LOGO_POS)
 
     # open the four corner regions (with clearance) and add tongues
     for sx in (1, -1):

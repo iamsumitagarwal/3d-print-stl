@@ -12,5 +12,5 @@ Overall size 82.6 × 168.0 mm, cavity 79 × 164 mm, back plate 3 mm (taken from 
 | `iphone17_promax_exoskeleton_assembled.stl` | – | preview of everything together |
 
 Print in TPU (or flexible PETG), shell back-down, corners back-down. Tweak the constants at the top of
-`generate_case.py` (clearance, camera opening, lip heights) and re-run. The camera opening size/position and the
-logo are approximations of the photos – verify the camera cut-out against your phone before printing.
+`generate_case.py` (clearance, camera opening, lip heights) and re-run. The camera opening size/position and
+"SUMIT" back text (debossed 0.4 mm, set `LOGO_TEXT`) are approximations of the photos – verify the camera cut-out against your phone before printing.
