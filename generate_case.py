@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
-"""Parametric iPhone 17 Pro Max "exoskeleton" case - single printable piece.
+"""Parametric iPhone 17 Pro Max "exoskeleton" case: skeleton + 4 clip-on corners.
 
-Shape (mm; case back faces -Z, phone screen faces +Z, camera end at +Y):
-  * flat back plate with chamfered edges and only a low lip along all four
-    edges (sides, buttons, ports stay exposed - as in the reference photos)
-  * four full-height wrap-around corner bumpers, slightly proud of the plate
-    outline, with a front lip that holds the phone
-  * tall raised rim around a large rounded camera opening
-  * MagSafe ring + alignment pill grooves on the inside floor
-  * bold debossed LOGO_TEXT on the back, reading bottom-to-top
+Construction follows the reference product photos (contours measured from them):
+  skeleton  - flat back plate with chamfered edges and a low 1.2 mm edge lip;
+              tall raised rim around a large rounded camera opening; MagSafe
+              ring + pill grooves inside; bold debossed LOGO_TEXT on the back;
+              at both ends of every corner a full-height clip post with a
+              rectangular window; plate corners notched so the caps wrap onto
+              the back face.
+  corner_*  - four curved L-shaped corner caps (16 x 22 mm in plan), full case
+              height, front lip over the screen, back flange that fills the
+              plate notch; each arm slides over a post and a snap bump clicks
+              into the post window.
 
-Outer size, cavity size, back-plate thickness and overall height are taken from
-the reference STL (82.6 x 168.0 mm, cavity ~79 x 164, plate z -3..0, top 10.95).
+Mm units; case back faces -Z, screen faces +Z, camera end at +Y. Outer size,
+cavity size, back-plate thickness and overall height are taken from the
+reference STL (82.6 x 168.0 mm, cavity ~79 x 164, plate z -3..0, top 10.95).
 
-Usage: python3 generate_case.py   ->  writes ./stl/iphone17_promax_exoskeleton_case.stl
+Usage: python3 generate_case.py   ->  writes ./stl/*.stl
 Requires: numpy, trimesh, manifold3d, shapely, matplotlib (font outlines)
 """
 import os
@@ -34,9 +38,14 @@ PHONE_H = 8.9                   # cavity height under the corner lips
 
 # ---- design choices matched to the photos ---------------------------------
 EDGE_LIP_H = 1.2                # low lip along the edges between the corners
-PLATE_INSET = 0.6               # plate outline sits inside the bumper outline
 CHAMFER = 0.8                   # edge chamfer on plate and bumpers
-CORNER_X, CORNER_Y = 15.0, 21.0 # bumper extent along short / long edge
+CORNER_X, CORNER_Y = 16.0, 22.0 # corner cap extent along short / long edge (photo contours)
+GAP = 0.15                      # print clearance skeleton <-> corner cap
+POST_T = 0.9                    # post thickness where the cap slides over it
+POST_OUT, POST_IN = 4.0, 6.0    # post length visible / hidden under the cap arm
+WIN_L, WIN_H, WIN_Z0 = 4.0, 4.0, 2.2   # clip window in each post
+SEAT_W = 2.5                    # width of the cap band that wraps onto the back face
+BUMP_C = 0.25                   # snap bump clearance inside the window
 FRONT_LIP = 2.0                 # bumper lip overlapping the screen edge
 CAM_W, CAM_H = 67.0, 41.0       # camera opening
 CAM_R = 8.0
@@ -105,56 +114,135 @@ def to_mesh(m):
                            np.asarray(mm.tri_verts), process=True)
 
 
+def corner_box(sx, sy, x0, x1, y0, y1, z0, z1):
+    """Box given in +X,+Y corner coordinates, mirrored into corner (sx, sy)."""
+    m = box(x0, x1, y0, y1, z0, z1)
+    if sx < 0:
+        m = m.mirror((1, 0, 0))
+    if sy < 0:
+        m = m.mirror((0, 1, 0))
+    return m
+
+
 def build():
     hx, hy = OUT_W / 2, OUT_L / 2
-    cavity = prism(rrect(CAV_W, CAV_L, CAV_R), 0.0, PHONE_H)
+    cx0, cy0 = hx - CORNER_X, hy - CORNER_Y          # where the cap arms end
+    cav_cs = rrect(CAV_W, CAV_L, CAV_R)
+    cavity = prism(cav_cs, 0.0, PHONE_H)
     window = prism(rrect(CAV_W - 2 * FRONT_LIP, CAV_L - 2 * FRONT_LIP, CAV_R - FRONT_LIP),
                    0.0, Z_TOP + 1)
 
-    # back plate + low edge lip (slightly inset from the bumper outline)
-    pw, pl, pr = OUT_W - 2 * PLATE_INSET, OUT_L - 2 * PLATE_INSET, OUT_R - PLATE_INSET
-    body = chamfered(pw, pl, pr, Z_BACK, EDGE_LIP_H, CHAMFER, 0.4)
+    def band(off0, off1, z0, z1):
+        """Ring between cavity outline offset by off0 and off1 (mm outward)."""
+        cs = rrect(CAV_W + 2 * off1, CAV_L + 2 * off1, CAV_R + off1)
+        cs = cs - rrect(CAV_W + 2 * off0, CAV_L + 2 * off0, CAV_R + off0)
+        return prism(cs, z0, z1)
 
-    # full-height corner bumpers
-    bumper_shell = chamfered(OUT_W, OUT_L, OUT_R, Z_BACK, Z_TOP)
+    wall = chamfered(OUT_W, OUT_L, OUT_R, 0.0 - 1, Z_TOP, 0.0, CHAMFER) - cavity  # full wall ring
+    wall_s = wall ^ box(-hx - 1, hx + 1, -hy - 1, hy + 1, -0.5, Z_TOP + 1)  # skeleton: overlaps plate
+    wall = wall ^ box(-hx - 1, hx + 1, -hy - 1, hy + 1, 0.0, Z_TOP + 1)
+
+    # ---- skeleton: back plate + low edge lip + clip posts -----------------
+    skel = chamfered(OUT_W, OUT_L, OUT_R, Z_BACK, 0.0, CHAMFER, 0.0)
+    lip = wall_s ^ box(-hx - 1, hx + 1, -hy - 1, hy + 1, -0.5, EDGE_LIP_H)
     for sx in (1, -1):
         for sy in (1, -1):
-            region = box(hx - CORNER_X, hx + 1, hy - CORNER_Y, hy + 1, Z_BACK - 1, Z_TOP + 1)
-            if sx < 0:
-                region = region.mirror((1, 0, 0))
-            if sy < 0:
-                region = region.mirror((0, 1, 0))
-            body = body + (bumper_shell ^ region)
+            lip = lip - corner_box(sx, sy, cx0, hx + 1, cy0, hy + 1, -1, Z_TOP + 1)
+    skel = skel + lip
 
-    body = body - cavity - window
+    thin = band(-0.01, POST_T, -0.5, PHONE_H)           # inner part of the wall under the cap
+    cap_clear = band(-0.05, POST_T + GAP, -0.5, PHONE_H + GAP) \
+        + band(-SEAT_W - 1, POST_T + GAP, Z_BACK - 1, 0.0)
+    for sx in (1, -1):
+        for sy in (1, -1):
+            for long_edge in (True, False):
+                if long_edge:   # post on the long (side) edge, around y = cy0
+                    exposed = corner_box(sx, sy, hx - 6, hx + 1, cy0 - POST_OUT, cy0, -1, PHONE_H)
+                    under = corner_box(sx, sy, hx - 6, hx + 1, cy0, cy0 + POST_IN, -1, PHONE_H)
+                    hole = corner_box(sx, sy, hx - 6, hx + 1, cy0 + 1.0, cy0 + 1.0 + WIN_L,
+                                      WIN_Z0, WIN_Z0 + WIN_H)
+                else:           # post on the short (top/bottom) edge, around x = cx0
+                    exposed = corner_box(sx, sy, cx0 - POST_OUT, cx0, hy - 6, hy + 1, -1, PHONE_H)
+                    under = corner_box(sx, sy, cx0, cx0 + POST_IN, hy - 6, hy + 1, -1, PHONE_H)
+                    hole = corner_box(sx, sy, cx0 + 1.0, cx0 + 1.0 + WIN_L, hy - 6, hy + 1,
+                                      WIN_Z0, WIN_Z0 + WIN_H)
+                post = (wall_s ^ exposed) + (thin ^ under)
+                skel = skel + (post - hole)
 
-    # camera opening with tall raised rim on the back
+    # zones where the cap arms slide over the posts (+X,+Y corner coordinates)
+    post_zone = (box(hx - 6, hx + 1, cy0 - 1, cy0 + POST_IN + GAP, Z_BACK - 1, Z_TOP + 1)
+                 + box(cx0 - 1, cx0 + POST_IN + GAP, hy - 6, hy + 1, Z_BACK - 1, Z_TOP + 1))
+    foot = POST_T + 0.05
+    post_foot = prism(rrect(CAV_W + 2 * foot, CAV_L + 2 * foot, CAV_R + foot),
+                      Z_BACK - 1, 0.5) ^ post_zone            # plate kept under the posts
+    seat_cs = rrect(OUT_W - 2 * SEAT_W, OUT_L - 2 * SEAT_W, OUT_R - SEAT_W)
+
+    # notch the plate corners so the caps wrap onto the back face
+    notch = (box(cx0, hx + 1, cy0, hy + 1, Z_BACK - 1, 0.2)
+             - prism(seat_cs.offset(-GAP, JoinType.Round, 2.0, SEG), Z_BACK - 2, 1)
+             - post_foot)
+    for sx in (1, -1):
+        for sy in (1, -1):
+            n = notch.mirror((1, 0, 0)) if sx < 0 else notch
+            skel = skel - (n.mirror((0, 1, 0)) if sy < 0 else n)
+
+    # ---- corner caps ------------------------------------------------------
+    cap_box = box(cx0 + GAP, hx + 1, cy0 + GAP, hy + 1, Z_BACK - 1, Z_TOP + 1)
+    cap0 = (wall ^ cap_box) - window
+    flange_slab = chamfered(OUT_W, OUT_L, OUT_R, Z_BACK, 0.3, CHAMFER, 0.0)  # overlaps the wall
+    flange = (flange_slab ^ cap_box) - prism(seat_cs, Z_BACK - 2, 0.0) - cavity
+    cap0 = cap0 + flange
+    # relieve the cap where it slides over the posts, add snap bumps for the windows
+    relief = cap_clear ^ post_zone
+    cap0 = cap0 - relief
+    bump_ring = band(0.3, POST_T + GAP + 0.01, WIN_Z0 + BUMP_C, WIN_Z0 + WIN_H - BUMP_C)
+    bumps = bump_ring ^ (box(hx - 6, hx + 1, cy0 + 1.0 + BUMP_C, cy0 + 1.0 + WIN_L - BUMP_C, -1, Z_TOP)
+                         + box(cx0 + 1.0 + BUMP_C, cx0 + 1.0 + WIN_L - BUMP_C, hy - 6, hy + 1, -1, Z_TOP))
+    cap0 = cap0 + bumps
+    caps = {}
+    for name, sx, sy in (("top_right", 1, 1), ("top_left", -1, 1),
+                         ("bottom_right", 1, -1), ("bottom_left", -1, -1)):
+        c = cap0.mirror((1, 0, 0)) if sx < 0 else cap0
+        caps[name] = c.mirror((0, 1, 0)) if sy < 0 else c
+
+    # ---- camera opening with tall raised rim ------------------------------
     cam_cy = hy - CAM_TOP_MARGIN - CAM_H / 2
     rim = chamfered(CAM_W + 2 * RIM_W, CAM_H + 2 * RIM_W, CAM_R + RIM_W,
                     Z_BACK - RIM_H, Z_BACK + 0.5, 0.6, 0.0, 0, cam_cy)
-    body = body + rim
-    body = body - prism(rrect(CAM_W, CAM_H, CAM_R, 0, cam_cy), Z_BACK - RIM_H - 1, 1.0)
+    skel = skel + rim
+    skel = skel - prism(rrect(CAM_W, CAM_H, CAM_R, 0, cam_cy), Z_BACK - RIM_H - 1, 1.0)
 
-    # MagSafe ring + alignment pill grooves on the inside floor
+    # ---- MagSafe grooves + logo -------------------------------------------
     ring = prism(CrossSection.circle(MAGSAFE_OD / 2, SEG) - CrossSection.circle(MAGSAFE_ID / 2, SEG),
                  -MAGSAFE_DEPTH, 0.01).translate((0, MAGSAFE_Y, 0))
-    pill_out = rrect(7.0, 16.0, 3.5, 0, MAGSAFE_Y - 38.0)
-    pill = prism(pill_out - rrect(5.0, 14.0, 2.5, 0, MAGSAFE_Y - 38.0), -MAGSAFE_DEPTH, 0.01)
-    body = body - ring - pill
+    pill = prism(rrect(7.0, 16.0, 3.5, 0, MAGSAFE_Y - 38.0) - rrect(5.0, 14.0, 2.5, 0, MAGSAFE_Y - 38.0),
+                 -MAGSAFE_DEPTH, 0.01)
+    skel = skel - ring - pill
+    skel = skel - text_solid(LOGO_TEXT, LOGO_HEIGHT, LOGO_DEPTH, *LOGO_POS)
+    return skel, caps
 
-    # bold debossed logo on the back
-    body = body - text_solid(LOGO_TEXT, LOGO_HEIGHT, LOGO_DEPTH, *LOGO_POS)
-    return body
+
+def to_trimesh_all(skel, caps):
+    meshes = {"skeleton": to_mesh(skel)}
+    for k, c in caps.items():
+        meshes[f"corner_{k}"] = to_mesh(c)
+    return meshes
 
 
 def main():
-    solid = build()
-    case = to_mesh(solid)
+    skel, caps = build()
     os.makedirs("stl", exist_ok=True)
-    out = "stl/iphone17_promax_exoskeleton_case.stl"
-    case.export(out)
-    print(f"{out}: watertight={case.is_watertight} bodies={len(solid.decompose())} "
-          f"vol={case.volume:.1f} mm3 size={np.round(case.extents, 2)}")
+    for f in os.listdir("stl"):
+        os.remove(os.path.join("stl", f))
+    for k, solid in [("skeleton", skel)] + [(f"corner_{k}", c) for k, c in caps.items()]:
+        m = to_mesh(solid)
+        m.export(f"stl/{k}.stl")
+        print(f"{k:22s} watertight={m.is_watertight} bodies={len(solid.decompose())} "
+              f"vol={m.volume:8.1f} mm3 size={np.round(m.extents, 2)}")
+    clash = sum((skel ^ c).volume() for c in caps.values())
+    print("skeleton/corner overlap volume:", round(clash, 4))
+    asm = trimesh.util.concatenate([to_mesh(skel)] + [to_mesh(c) for c in caps.values()])
+    asm.export("stl/assembled_preview.stl")
 
 
 if __name__ == "__main__":
