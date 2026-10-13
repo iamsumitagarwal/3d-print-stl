@@ -13,16 +13,28 @@ Parametric case modelled on the reference product photos: a blue **skeleton** pl
 | `corner_top_left.stl`, `corner_top_right.stl`, `corner_bottom_left.stl`, `corner_bottom_right.stl` | orange | 1 each |
 | `assembled_preview.stl` | – | all parts in place (viewing only) |
 
-**Skeleton** – flat 3 mm back plate with a 1.2 mm edge lip (sides, buttons, ports open), 3.5 mm raised camera rim
-around a 67 × 41 mm opening, MagSafe ring + pill grooves inside, bold **SUMIT** debossed 1.2 mm on the back,
-and a windowed clip post at each end of every corner.
+**Skeleton** – flat 3 mm back plate with a 1.2 mm edge lip (sides and buttons open; bottom edge fully open
+between the corners for USB-C / speakers), 3.5 mm raised camera rim around the camera opening, MagSafe ring +
+pill grooves inside, bold **SUMIT** debossed 1.2 mm on the back, and windowed clip posts at the corner ends.
 
-**Corner caps** – 16 × 22 mm curved L-shapes, full case height (13.95 mm), 2 mm lip over the screen, and a
-2.5 mm band that wraps onto the back. Each arm slides over a post and a snap bump clicks into its window.
-Clearance between parts is 0.15 mm (`GAP`).
+**Corner caps** – 16 × 22 mm curved L-shapes, full case height (13.95 mm), and a 2.5 mm band that wraps onto
+the back. Each arm slides over a post and a snap bump clicks into its window. Clearance between parts is
+0.15 mm (`GAP`).
 
-Size taken from the reference STL: 82.6 × 168.0 mm footprint, 79 × 164 mm phone cavity, 3 mm back.
+## Fit (measured from the reference STL)
+
+| | Value |
+|---|---|
+| Outer footprint | 82.6 × 168.0 mm |
+| Phone pocket | 78.97 × 164.43 mm, corner R 14.72 (≈0.5 mm clearance around the 78.0 × 163.4 mm phone) |
+| Pocket floor → top of corners | 0 → 10.95 mm (back plate 3 mm) |
+| Screen lip | corner arcs only: 45° chamfer from z 8.2 mm, 2.0 mm overhang from z 10.2 mm |
+| Camera opening | 75.57 × 45.99 mm, R 12, y 34.8 → 80.8 mm from the centre |
+
+`python3 validate_fit.py <reference.stl>` re-checks this: it fits a virtual iPhone 17 Pro Max into both the
+reference and this case, grows it in steps, and prints how much it overlaps each – the two columns match
+(no contact at nominal size; first contact at the same growth step) – plus lip and camera-opening measurements.
 
 **Printing:** TPU recommended for the caps (they must flex over the posts); skeleton in TPU or PETG, back face
 down. Print caps back-flange down with supports under the screen lip. Check the camera opening against your
-phone before printing – it is estimated from the photos.
+phone before printing.

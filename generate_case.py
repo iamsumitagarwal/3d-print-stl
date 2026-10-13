@@ -13,9 +13,11 @@ Construction follows the reference product photos (contours measured from them):
               plate notch; each arm slides over a post and a snap bump clicks
               into the post window.
 
-Mm units; case back faces -Z, screen faces +Z, camera end at +Y. Outer size,
-cavity size, back-plate thickness and overall height are taken from the
-reference STL (82.6 x 168.0 mm, cavity ~79 x 164, plate z -3..0, top 10.95).
+Mm units; case back faces -Z, screen faces +Z, camera end at +Y. All fit-critical
+geometry is measured from the reference STL: outer 82.6 x 168.0 mm, phone pocket
+78.97 x 164.43 mm R 14.72, plate z -3..0, top 10.95, corner-arc screen lip (45 deg
+from z 8.2 to 2 mm), camera opening 75.57 x 45.99 mm R 12. validate_fit.py
+checks the result against the reference.
 
 Usage: python3 generate_case.py   ->  writes ./stl/*.stl
 Requires: numpy, trimesh, manifold3d, shapely, matplotlib (font outlines)
@@ -30,11 +32,17 @@ SEG = 96
 # ---- dimensions (from reference STL) --------------------------------------
 OUT_W, OUT_L = 82.6, 168.0      # outer footprint (at the corner bumpers)
 OUT_R = 13.6                    # outer plan corner radius
-CAV_W, CAV_L = 79.0, 164.0      # phone cavity (phone is 78.0 x 163.4 x 8.75)
-CAV_R = 11.6
-Z_BACK = -3.0                   # outside face of back plate
+# Phone pocket, fitted to the reference at every height (max deviation 0.03 mm):
+# 78.97 x 164.43 mm, R 14.72 -> ~0.5 mm clearance around a 78.0 x 163.4 mm phone.
+CAV_W, CAV_L = 78.97, 164.43
+CAV_R = 14.72
+Z_BACK = -3.0                   # outside face of back plate (pocket floor is z = 0)
 Z_TOP = 10.95                   # top of corner bumpers
-PHONE_H = 8.9                   # cavity height under the corner lips
+# Screen lip, as in the reference: only along the four corner arcs, a 45-degree
+# chamfer starting at LIP_Z0 that reaches LIP_DEPTH at LIP_Z0 + LIP_DEPTH.
+LIP_Z0, LIP_DEPTH = 8.2, 2.0
+POST_H = LIP_Z0 - 0.25          # clip post height (relief stays below the lip)
+PORT_HALF_W = 24.9              # bottom edge kept free for |x| < this (ports / speakers)
 
 # ---- design choices matched to the photos ---------------------------------
 EDGE_LIP_H = 1.2                # low lip along the edges between the corners
@@ -46,11 +54,11 @@ POST_OUT, POST_IN = 4.0, 6.0    # post length visible / hidden under the cap arm
 WIN_L, WIN_H, WIN_Z0 = 4.0, 4.0, 2.2   # clip window in each post
 SEAT_W = 2.5                    # width of the cap band that wraps onto the back face
 BUMP_C = 0.25                   # snap bump clearance inside the window
-FRONT_LIP = 2.0                 # bumper lip overlapping the screen edge
-CAM_W, CAM_H = 67.0, 41.0       # camera opening
-CAM_R = 8.0
-CAM_TOP_MARGIN = 8.0            # case top edge -> opening
-RIM_W, RIM_H = 2.5, 3.5         # raised camera rim (width, height above back)
+CAM_W, CAM_H = 75.57, 45.99     # camera opening (from reference)
+CAM_R = 12.0
+CAM_CY = 57.80                  # opening centre (y 34.80 .. 80.79)
+CAM_RELIEF, CAM_RELIEF_D = 1.2, 1.0   # inside relief around the opening (width, depth)
+RIM_W, RIM_H = 2.0, 3.5         # raised camera rim (width, height above back)
 LOGO_TEXT = "SUMIT"
 LOGO_HEIGHT, LOGO_DEPTH = 8.0, 1.2   # cap height, deboss depth (plate is 3 mm)
 LOGO_POS = (-29.0, -44.0)       # text centre; -X is the right side seen from the back
@@ -114,6 +122,22 @@ def to_mesh(m):
                            np.asarray(mm.tri_verts), process=True)
 
 
+def phone_void():
+    """Space for the phone (z >= 0): the pocket, closed in by the corner-arc lip."""
+    hw, hl = CAV_W / 2 - CAV_R, CAV_L / 2 - CAV_R      # arc centres
+    top = Z_TOP + 1
+    void = box(-hw, hw, -CAV_L / 2, CAV_L / 2, 0, top) + box(-CAV_W / 2, CAV_W / 2, -hl, hl, 0, top)
+    r0, r1 = CAV_R, CAV_R - LIP_DEPTH
+    z1 = LIP_Z0 + LIP_DEPTH
+    arc = (Manifold.cylinder(LIP_Z0, r0, r0, SEG)
+           + Manifold.cylinder(z1 - LIP_Z0, r0, r1, SEG).translate((0, 0, LIP_Z0))
+           + Manifold.cylinder(top - z1, r1, r1, SEG).translate((0, 0, z1)))
+    for sx in (1, -1):
+        for sy in (1, -1):
+            void = void + arc.translate((sx * hw, sy * hl, 0))
+    return void
+
+
 def corner_box(sx, sy, x0, x1, y0, y1, z0, z1):
     """Box given in +X,+Y corner coordinates, mirrored into corner (sx, sy)."""
     m = box(x0, x1, y0, y1, z0, z1)
@@ -128,9 +152,7 @@ def build():
     hx, hy = OUT_W / 2, OUT_L / 2
     cx0, cy0 = hx - CORNER_X, hy - CORNER_Y          # where the cap arms end
     cav_cs = rrect(CAV_W, CAV_L, CAV_R)
-    cavity = prism(cav_cs, 0.0, PHONE_H)
-    window = prism(rrect(CAV_W - 2 * FRONT_LIP, CAV_L - 2 * FRONT_LIP, CAV_R - FRONT_LIP),
-                   0.0, Z_TOP + 1)
+    cavity = phone_void()
 
     def band(off0, off1, z0, z1):
         """Ring between cavity outline offset by off0 and off1 (mm outward)."""
@@ -148,25 +170,28 @@ def build():
     for sx in (1, -1):
         for sy in (1, -1):
             lip = lip - corner_box(sx, sy, cx0, hx + 1, cy0, hy + 1, -1, Z_TOP + 1)
+    lip = lip - box(-PORT_HALF_W, PORT_HALF_W, -hy - 1, -hy + 6, -0.4, Z_TOP + 1)
     skel = skel + lip
 
-    thin = band(-0.01, POST_T, -0.5, PHONE_H)           # inner part of the wall under the cap
-    cap_clear = band(-0.05, POST_T + GAP, -0.5, PHONE_H + GAP) \
+    thin = band(-0.01, POST_T, -0.5, POST_H)           # inner part of the wall under the cap
+    cap_clear = band(-0.05, POST_T + GAP, -0.5, POST_H + GAP) \
         + band(-SEAT_W - 1, POST_T + GAP, Z_BACK - 1, 0.0)
     for sx in (1, -1):
         for sy in (1, -1):
             for long_edge in (True, False):
                 if long_edge:   # post on the long (side) edge, around y = cy0
-                    exposed = corner_box(sx, sy, hx - 6, hx + 1, cy0 - POST_OUT, cy0, -1, PHONE_H)
-                    under = corner_box(sx, sy, hx - 6, hx + 1, cy0, cy0 + POST_IN, -1, PHONE_H)
+                    exposed = corner_box(sx, sy, hx - 6, hx + 1, cy0 - POST_OUT, cy0, -1, POST_H)
+                    under = corner_box(sx, sy, hx - 6, hx + 1, cy0, cy0 + POST_IN, -1, POST_H)
                     hole = corner_box(sx, sy, hx - 6, hx + 1, cy0 + 1.0, cy0 + 1.0 + WIN_L,
                                       WIN_Z0, WIN_Z0 + WIN_H)
                 else:           # post on the short (top/bottom) edge, around x = cx0
-                    exposed = corner_box(sx, sy, cx0 - POST_OUT, cx0, hy - 6, hy + 1, -1, PHONE_H)
-                    under = corner_box(sx, sy, cx0, cx0 + POST_IN, hy - 6, hy + 1, -1, PHONE_H)
+                    exposed = corner_box(sx, sy, cx0 - POST_OUT, cx0, hy - 6, hy + 1, -1, POST_H)
+                    under = corner_box(sx, sy, cx0, cx0 + POST_IN, hy - 6, hy + 1, -1, POST_H)
                     hole = corner_box(sx, sy, cx0 + 1.0, cx0 + 1.0 + WIN_L, hy - 6, hy + 1,
                                       WIN_Z0, WIN_Z0 + WIN_H)
-                post = (wall_s ^ exposed) + (thin ^ under)
+                if not long_edge and sy < 0:
+                    exposed = None      # keep the bottom edge clear for the ports
+                post = (thin ^ under) if exposed is None else (wall_s ^ exposed) + (thin ^ under)
                 skel = skel + (post - hole)
 
     # zones where the cap arms slide over the posts (+X,+Y corner coordinates)
@@ -188,7 +213,7 @@ def build():
 
     # ---- corner caps ------------------------------------------------------
     cap_box = box(cx0 + GAP, hx + 1, cy0 + GAP, hy + 1, Z_BACK - 1, Z_TOP + 1)
-    cap0 = (wall ^ cap_box) - window
+    cap0 = wall ^ cap_box
     flange_slab = chamfered(OUT_W, OUT_L, OUT_R, Z_BACK, 0.3, CHAMFER, 0.0)  # overlaps the wall
     flange = (flange_slab ^ cap_box) - prism(seat_cs, Z_BACK - 2, 0.0) - cavity
     cap0 = cap0 + flange
@@ -206,11 +231,16 @@ def build():
         caps[name] = c.mirror((0, 1, 0)) if sy < 0 else c
 
     # ---- camera opening with tall raised rim ------------------------------
-    cam_cy = hy - CAM_TOP_MARGIN - CAM_H / 2
+    cam_cy = CAM_CY
+    rim_cs = rrect(CAM_W + 2 * RIM_W, CAM_H + 2 * RIM_W, CAM_R + RIM_W, 0, cam_cy)
     rim = chamfered(CAM_W + 2 * RIM_W, CAM_H + 2 * RIM_W, CAM_R + RIM_W,
-                    Z_BACK - RIM_H, Z_BACK + 0.5, 0.6, 0.0, 0, cam_cy)
+                    Z_BACK - RIM_H, Z_BACK, 0.6, 0.0, 0, cam_cy)
+    # fuse into the plate only where the plate is (not under the corner caps)
+    rim = rim + prism(rim_cs.offset(-0.2, JoinType.Round, 2.0, SEG) ^ seat_cs.offset(-GAP - 0.3, JoinType.Round, 2.0, SEG), Z_BACK - 0.3, Z_BACK + 0.5)
     skel = skel + rim
     skel = skel - prism(rrect(CAM_W, CAM_H, CAM_R, 0, cam_cy), Z_BACK - RIM_H - 1, 1.0)
+    skel = skel - prism(rrect(CAM_W + 2 * CAM_RELIEF, CAM_H + 2 * CAM_RELIEF, CAM_R + CAM_RELIEF,
+                              0, cam_cy), -CAM_RELIEF_D, 1.0)
 
     # ---- MagSafe grooves + logo -------------------------------------------
     ring = prism(CrossSection.circle(MAGSAFE_OD / 2, SEG) - CrossSection.circle(MAGSAFE_ID / 2, SEG),
